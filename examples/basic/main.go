@@ -1,59 +1,25 @@
 package main
 
 import (
-	"bytes"
-	"encoding/binary"
-	"errors"
 	"fmt"
-	"hash/crc32"
 	"image/png"
 	"os"
 
 	"github.com/luchzin/png-embed"
 )
 
-var pngSig = []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
-
-type Chunk struct {
-	Type string
-	Data []byte
-}
-
-func ParsePNG(b []byte) ([]Chunk, error) {
-	if len(b) < 8 || !bytes.Equal(b[:8], pngSig) {
-		return nil, errors.New("bad PNG signature")
-	}
-	var chunks []Chunk
-	i := 8
-	for i+12 <= len(b) {
-		length := int(binary.BigEndian.Uint32(b[i : i+4]))
-		if i+12+length > len(b) {
-			return nil, fmt.Errorf("chunk at %d overruns file", i)
-		}
-		typ := string(b[i+4 : i+8])
-		data := b[i+8 : i+8+length]
-		crc := binary.BigEndian.Uint32(b[i+8+length : i+12+length])
-		calc := crc32.ChecksumIEEE(b[i+4 : i+8+length])
-		if crc != calc {
-			fmt.Printf("warn: bad CRC in %s (fixing on write)\n", typ)
-		}
-		chunks = append(chunks, Chunk{typ, append([]byte(nil), data...)})
-		i += 12 + length
-		if typ == "IEND" {
-			if i < len(b) {
-				fmt.Printf("warn: %d trailing bytes after IEND dropped\n", len(b)-i)
-			}
-			break
-		}
-	}
-	return chunks, nil
-}
-
 func printUsage() {
 	fmt.Println("Usage:")
-	fmt.Println("  go run ./examples/basic embed <in.png> <out.png> <key/flag>")
-	fmt.Println("  go run ./examples/basic extract <in.png>")
-	fmt.Println("  go run ./examples/basic chunks <in.png>")
+	fmt.Println("  Pixel LSB Steganography:")
+	fmt.Println("    go run ./examples/basic embed <in.png> <out.png> <secret>")
+	fmt.Println("    go run ./examples/basic extract <in.png>")
+	fmt.Println("")
+	fmt.Println("  Custom Ancillary PNG Chunks:")
+	fmt.Println("    go run ./examples/basic embed-chunk <in.png> <out.png> <type> <secret>")
+	fmt.Println("    go run ./examples/basic extract-chunk <in.png> <type>")
+	fmt.Println("    go run ./examples/basic embed-text <in.png> <out.png> <keyword> <text>")
+	fmt.Println("    go run ./examples/basic extract-text <in.png>")
+	fmt.Println("    go run ./examples/basic list-chunks <in.png>")
 }
 
 func main() {
@@ -65,14 +31,13 @@ func main() {
 	cmd := os.Args[1]
 
 	switch cmd {
-	case "embed":
+	// Pixel LSB Steganography
+	case "embed", "embed-pixel":
 		if len(os.Args) < 5 {
 			fmt.Println("Usage: embed <in.png> <out.png> <secret>")
 			os.Exit(1)
 		}
-		inPath := os.Args[2]
-		outPath := os.Args[3]
-		secret := []byte(os.Args[4])
+		inPath, outPath, secret := os.Args[2], os.Args[3], []byte(os.Args[4])
 
 		inFile, err := os.Open(inPath)
 		if err != nil {
@@ -100,9 +65,9 @@ func main() {
 			panic(fmt.Errorf("failed to encode PNG: %w", err))
 		}
 
-		fmt.Printf("Successfully embedded %d bytes into %s\n", len(secret), outPath)
+		fmt.Printf("Successfully embedded %d bytes into pixels of %s\n", len(secret), outPath)
 
-	case "extract":
+	case "extract", "extract-pixel":
 		if len(os.Args) < 3 {
 			fmt.Println("Usage: extract <in.png>")
 			os.Exit(1)
@@ -125,23 +90,119 @@ func main() {
 			panic(fmt.Errorf("extract failed: %w", err))
 		}
 
-		fmt.Printf("Extracted Secret: %s\n", string(extracted))
+		fmt.Printf("Extracted Secret from pixels: %s\n", string(extracted))
 
-	case "chunks":
-		if len(os.Args) < 3 {
-			fmt.Println("Usage: chunks <in.png>")
+	// Custom Chunk Steganography
+	case "embed-chunk":
+		if len(os.Args) < 6 {
+			fmt.Println("Usage: embed-chunk <in.png> <out.png> <4-char-type> <secret>")
 			os.Exit(1)
 		}
-		in, err := os.ReadFile(os.Args[2])
+		inPath, outPath, chunkType, secret := os.Args[2], os.Args[3], os.Args[4], []byte(os.Args[5])
+
+		data, err := os.ReadFile(inPath)
 		if err != nil {
 			panic(err)
 		}
-		chunks, err := ParsePNG(in)
+
+		outData, err := pngembed.EmbedChunk(data, chunkType, secret)
+		if err != nil {
+			panic(fmt.Errorf("embed-chunk failed: %w", err))
+		}
+
+		if err := os.WriteFile(outPath, outData, 0o644); err != nil {
+			panic(err)
+		}
+
+		fmt.Printf("Successfully injected chunk %q (%d bytes) into %s\n", chunkType, len(secret), outPath)
+
+	case "extract-chunk":
+		if len(os.Args) < 4 {
+			fmt.Println("Usage: extract-chunk <in.png> <4-char-type>")
+			os.Exit(1)
+		}
+		inPath, chunkType := os.Args[2], os.Args[3]
+
+		data, err := os.ReadFile(inPath)
 		if err != nil {
 			panic(err)
 		}
+
+		chunks, err := pngembed.ExtractChunks(data, chunkType)
+		if err != nil {
+			panic(fmt.Errorf("extract-chunk failed: %w", err))
+		}
+
+		for idx, c := range chunks {
+			fmt.Printf("[%d] %s: %s\n", idx, chunkType, string(c))
+		}
+
+	case "embed-text":
+		if len(os.Args) < 6 {
+			fmt.Println("Usage: embed-text <in.png> <out.png> <keyword> <text>")
+			os.Exit(1)
+		}
+		inPath, outPath, keyword, text := os.Args[2], os.Args[3], os.Args[4], os.Args[5]
+
+		data, err := os.ReadFile(inPath)
+		if err != nil {
+			panic(err)
+		}
+
+		outData, err := pngembed.EmbedTextChunk(data, keyword, text)
+		if err != nil {
+			panic(fmt.Errorf("embed-text failed: %w", err))
+		}
+
+		if err := os.WriteFile(outPath, outData, 0o644); err != nil {
+			panic(err)
+		}
+
+		fmt.Printf("Successfully added tEXt chunk (%s: %s) to %s\n", keyword, text, outPath)
+
+	case "extract-text":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: extract-text <in.png>")
+			os.Exit(1)
+		}
+		inPath := os.Args[2]
+
+		data, err := os.ReadFile(inPath)
+		if err != nil {
+			panic(err)
+		}
+
+		texts, err := pngembed.ExtractTextChunks(data)
+		if err != nil {
+			panic(fmt.Errorf("extract-text failed: %w", err))
+		}
+
+		for k, v := range texts {
+			fmt.Printf("%s: %s\n", k, v)
+		}
+
+	case "chunks", "list-chunks":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: list-chunks <in.png>")
+			os.Exit(1)
+		}
+		inPath := os.Args[2]
+
+		data, err := os.ReadFile(inPath)
+		if err != nil {
+			panic(err)
+		}
+
+		chunks, err := pngembed.ListChunks(data)
+		if err != nil {
+			panic(fmt.Errorf("list-chunks failed: %w", err))
+		}
+
+		fmt.Printf("%-8s %-10s %-12s %-10s %-10s\n", "Type", "Length", "Offset", "Ancillary?", "Valid CRC?")
+		fmt.Println("---------------------------------------------------------")
 		for _, c := range chunks {
-			fmt.Println(c.Type, len(c.Data))
+			fmt.Printf("%-8s %-10d 0x%-10X %-10v %-10v\n",
+				c.Type, c.Length, c.Offset, c.IsAncillary, c.ValidCRC)
 		}
 
 	default:
