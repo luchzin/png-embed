@@ -26,19 +26,15 @@ func TestEmbedAndExtractCustomChunk(t *testing.T) {
 	customType := "cTFg"
 	payload := []byte("CTF{hidden_in_custom_ancillary_chunk_2026}")
 
-	// Embed chunk
 	modifiedPNG, err := pngembed.EmbedChunk(pngData, customType, payload)
 	if err != nil {
 		t.Fatalf("EmbedChunk failed: %v", err)
 	}
 
-	// Verify the modified PNG is still 100% valid for standard image viewers/decoders
-	_, err = png.Decode(bytes.NewReader(modifiedPNG))
-	if err != nil {
+	if _, err = png.Decode(bytes.NewReader(modifiedPNG)); err != nil {
 		t.Fatalf("standard png.Decode failed on stego PNG: %v", err)
 	}
 
-	// Extract chunk
 	extracted, err := pngembed.ExtractChunks(modifiedPNG, customType)
 	if err != nil {
 		t.Fatalf("ExtractChunks failed: %v", err)
@@ -65,12 +61,10 @@ func TestEmbedAndExtractTextChunk(t *testing.T) {
 		t.Fatalf("EmbedTextChunk failed: %v", err)
 	}
 
-	// Still decodable
 	if _, err := png.Decode(bytes.NewReader(stegoPNG)); err != nil {
 		t.Fatalf("standard decoder failed: %v", err)
 	}
 
-	// Extract
 	texts, err := pngembed.ExtractTextChunks(stegoPNG)
 	if err != nil {
 		t.Fatalf("ExtractTextChunks failed: %v", err)
@@ -133,4 +127,3 @@ func TestValidateChunkType(t *testing.T) {
 		}
 	}
 }
-

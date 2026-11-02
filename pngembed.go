@@ -9,15 +9,12 @@ import (
 )
 
 var (
-	// MagicHeader is prepended before the data to identify embedded messages.
-	MagicHeader = []byte("STEG")
-
+	MagicHeader        = []byte("STEG")
 	ErrPayloadTooLarge = errors.New("payload exceeds maximum image pixel capacity")
 	ErrNoMagicFound    = errors.New("no embedded data found (magic header mismatch)")
 	ErrCorruptData     = errors.New("embedded data length corrupted or out of bounds")
 )
 
-// ToNRGBA converts any image.Image into a mutable *image.NRGBA.
 func ToNRGBA(src image.Image) *image.NRGBA {
 	bounds := src.Bounds()
 	dst := image.NewNRGBA(bounds)
@@ -25,20 +22,16 @@ func ToNRGBA(src image.Image) *image.NRGBA {
 	return dst
 }
 
-// MaxPixelCapacity returns the maximum number of payload bytes that can fit in the image.
 func MaxPixelCapacity(bounds image.Rectangle) int {
-	// Each pixel has 3 color channels (R, G, B) = 3 bits per pixel.
 	totalPixels := bounds.Dx() * bounds.Dy()
 	totalBits := totalPixels * 3
-	headerBits := (len(MagicHeader) + 4) * 8 // magic + 4 bytes length
+	headerBits := (len(MagicHeader) + 4) * 8
 	if totalBits <= headerBits {
 		return 0
 	}
 	return (totalBits - headerBits) / 8
 }
 
-// EmbedInPixels embeds secret payload bytes into the least significant bits
-// of the RGB channels of src image.
 func EmbedInPixels(src image.Image, payload []byte) (*image.NRGBA, error) {
 	bounds := src.Bounds()
 	maxCapacity := MaxPixelCapacity(bounds)
@@ -47,7 +40,6 @@ func EmbedInPixels(src image.Image, payload []byte) (*image.NRGBA, error) {
 			ErrPayloadTooLarge, maxCapacity, len(payload))
 	}
 
-	// Construct bitstream: Magic (4 bytes) + Length (4 bytes uint32) + Payload
 	var buf []byte
 	buf = append(buf, MagicHeader...)
 	lenBytes := make([]byte, 4)
@@ -68,11 +60,8 @@ func EmbedInPixels(src image.Image, payload []byte) (*image.NRGBA, error) {
 				if bitIdx >= totalBits {
 					break
 				}
-				// Get current bit from buffer
 				byteVal := buf[bitIdx/8]
 				bit := (byteVal >> (7 - (bitIdx % 8))) & 1
-
-				// Clear lowest bit and set to our bit
 				*ch = (*ch & 0xFE) | bit
 				bitIdx++
 			}
@@ -84,18 +73,16 @@ func EmbedInPixels(src image.Image, payload []byte) (*image.NRGBA, error) {
 	return img, nil
 }
 
-// ExtractFromPixels extracts the embedded secret payload from the RGB channels.
 func ExtractFromPixels(src image.Image) ([]byte, error) {
 	bounds := src.Bounds()
 	img := ToNRGBA(src)
 
-	// Helper iterator to read bits sequentially
 	type bitReader struct {
 		x, y    int
 		channel int
 	}
 
-	r := &bitReader{x: bounds.Min.X, y: bounds.Min.Y, channel: 0}
+	r := &bitReader{x: bounds.Min.X, y: bounds.Min.Y}
 	readBit := func() (byte, bool) {
 		if r.y >= bounds.Max.Y {
 			return 0, false
@@ -140,13 +127,11 @@ func ExtractFromPixels(src image.Image) ([]byte, error) {
 		return out, nil
 	}
 
-	// 1. Read and check magic header
 	magic, err := readBytes(len(MagicHeader))
 	if err != nil || string(magic) != string(MagicHeader) {
 		return nil, ErrNoMagicFound
 	}
 
-	// 2. Read length prefix
 	lenBytes, err := readBytes(4)
 	if err != nil {
 		return nil, ErrCorruptData
@@ -156,7 +141,6 @@ func ExtractFromPixels(src image.Image) ([]byte, error) {
 		return nil, ErrCorruptData
 	}
 
-	// 3. Read payload
 	payload, err := readBytes(payloadLen)
 	if err != nil {
 		return nil, ErrCorruptData

@@ -29,25 +29,21 @@ func TestEmbedAndExtractPixels(t *testing.T) {
 	origImg := createTestImage(64, 64)
 	secret := []byte("CTF{hidden_pixel_stego_flag_2026}")
 
-	// 1. Embed secret in pixels
 	stegoImg, err := pngembed.EmbedInPixels(origImg, secret)
 	if err != nil {
 		t.Fatalf("EmbedInPixels failed: %v", err)
 	}
 
-	// 2. Encode to PNG format (lossless compression)
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, stegoImg); err != nil {
 		t.Fatalf("png.Encode failed: %v", err)
 	}
 
-	// 3. Decode from PNG format
 	decodedImg, err := png.Decode(&buf)
 	if err != nil {
 		t.Fatalf("png.Decode failed: %v", err)
 	}
 
-	// 4. Extract secret
 	extracted, err := pngembed.ExtractFromPixels(decodedImg)
 	if err != nil {
 		t.Fatalf("ExtractFromPixels failed: %v", err)
@@ -67,7 +63,7 @@ func TestExtractNoSecret(t *testing.T) {
 }
 
 func TestPayloadTooLarge(t *testing.T) {
-	tinyImg := createTestImage(4, 4) // 16 pixels * 3 bits = 48 bits (header takes 64 bits)
+	tinyImg := createTestImage(4, 4)
 	_, err := pngembed.EmbedInPixels(tinyImg, []byte("too long"))
 	if err == nil {
 		t.Fatal("expected error for payload exceeding capacity")
